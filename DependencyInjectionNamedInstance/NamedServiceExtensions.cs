@@ -8,19 +8,16 @@ namespace DependencyInjectionNamedInstance
 {
     public static class NamedServiceExtensions
     {
+        // Relies on creating new types at runtime that map named registrations inside container to named instances
+        // Factory class knows how to look things up using these dynamic types from service container
         public static IServiceCollection AddNamedTransient<T>(this IServiceCollection services, string name, Func<IServiceProvider, T> factory, ServiceLifetime lifetime)
         {
             TypeBuilder tb = GetTypeBuilder(name);
-            var type = tb.CreateType();
-            object TypeCastFactory(IServiceProvider ctx) => factory(ctx);
+            var serviceType = tb.CreateType();
+            var serviceRegistrationWrapper = new ServiceRegistrationWrapper() {Target = ctx => factory(ctx)};
+            ServiceRegistrationWrapper.ImplementationToRegistrationMap[Tuple.Create(name, typeof(T))] = serviceType;
 
-            var myType = (ServiceRegistrationWrapper)Activator.CreateInstance(type);
-            myType.Target = TypeCastFactory;
-            myType.ObjectType = typeof(T);
-            myType.Name = name;
-            myType.Register();
-            services.Add(new ServiceDescriptor(myType.GetType(), ctx => myType.Target.Invoke(ctx), lifetime));
-
+            services.Add(new ServiceDescriptor(serviceType, ctx => serviceRegistrationWrapper.Target.Invoke(ctx), lifetime));
 
             var factoryRegistration = services.FirstOrDefault(x => x.ServiceType == typeof(NamedServiceFactory<T>));
             if (factoryRegistration == null)
@@ -28,8 +25,7 @@ namespace DependencyInjectionNamedInstance
                 services.Add(new ServiceDescriptor(typeof(INamedServiceFactory<T>), ctx =>
                 {
                     var ctxLocal = ctx;
-                    var f1 = new NamedServiceFactory<T>(ctxLocal);
-                    return f1;
+                    return new NamedServiceFactory<T>(ctxLocal);
                 }, lifetime)); // potentially wanna always go to transient here, need to discuss
             }
             return services;
